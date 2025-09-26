@@ -21,7 +21,13 @@ import json_tricks as json
 import numpy as np
 from torch.utils.data import Dataset
 
-from crowdposetools.cocoeval import COCOeval
+try:
+    from crowdposetools.cocoeval import COCOeval
+except Exception:
+    # Dummy stub so importing this file doesn't fail when CrowdPose isn't used
+    class COCOeval:
+        pass
+
 from utils import zipreader
 from utils.rescore import CrowdRescoreEval
 

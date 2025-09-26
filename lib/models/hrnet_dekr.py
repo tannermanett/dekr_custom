@@ -244,10 +244,12 @@ class PoseHigherResolutionNet(nn.Module):
             y_list = getattr(self, 'stage{}'.format(i+2))(x_list)
 
         x0_h, x0_w = y_list[0].size(2), y_list[0].size(3)
-        x = torch.cat([y_list[0], \
-            F.upsample(y_list[1], size=(x0_h, x0_w), mode='bilinear'), \
-            F.upsample(y_list[2], size=(x0_h, x0_w), mode='bilinear'), \
-            F.upsample(y_list[3], size=(x0_h, x0_w), mode='bilinear')], 1)
+        x = torch.cat([
+            y_list[0],
+            F.interpolate(y_list[1], size=(x0_h, x0_w), mode='bilinear', align_corners=False),
+            F.interpolate(y_list[2], size=(x0_h, x0_w), mode='bilinear', align_corners=False),
+            F.interpolate(y_list[3], size=(x0_h, x0_w), mode='bilinear', align_corners=False)
+        ], 1)
 
         heatmap = self.head_heatmap[1](
             self.head_heatmap[0](self.transition_heatmap(x)))

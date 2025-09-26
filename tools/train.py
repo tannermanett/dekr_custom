@@ -130,6 +130,11 @@ def main_worker(
     torch.backends.cudnn.deterministic = cfg.CUDNN.DETERMINISTIC
     torch.backends.cudnn.enabled = cfg.CUDNN.ENABLED
 
+    # TF32 toggle for Ampere+ GPUs
+    if hasattr(torch.backends, 'cuda'):
+        torch.backends.cuda.matmul.allow_tf32 = getattr(cfg, 'TF32', True)
+        torch.backends.cudnn.allow_tf32 = getattr(cfg, 'TF32', True)
+
     args.gpu = gpu
 
     if args.gpu is not None:
@@ -144,6 +149,10 @@ def main_worker(
             args.rank = args.rank * ngpus_per_node + gpu
         print('Init process group: dist_url: {}, world_size: {}, rank: {}'.
               format(args.dist_url, args.world_size, args.rank))
+        # Avoid /dev/shm issues on WSL2 by using file_system sharing if configured
+        if getattr(cfg, 'FILE_SYSTEM_SHARING', False):
+            torch.multiprocessing.set_sharing_strategy('file_system')
+
         dist.init_process_group(
             backend=cfg.DIST_BACKEND,
             init_method=args.dist_url,
@@ -159,6 +168,10 @@ def main_worker(
     model = eval('models.'+cfg.MODEL.NAME+'.get_pose_net')(
         cfg, is_train=True
     )
+
+    # optional memory format optimization
+    if getattr(cfg, 'CHANNELS_LAST', False):
+        model = model.to(memory_format=torch.channels_last)
 
     # copy model file
     if not cfg.MULTIPROCESSING_DISTRIBUTED or (

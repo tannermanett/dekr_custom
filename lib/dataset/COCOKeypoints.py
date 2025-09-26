@@ -42,7 +42,21 @@ class CocoKeypoints(CocoDataset):
         ]
 
     def __getitem__(self, idx):
-        img, anno, image_info = super().__getitem__(idx)
+
+        # --- robust val/test guard ---
+        r = super().__getitem__(idx)
+        if isinstance(r, (list, tuple)):
+            img, anno, image_info = r
+        else:
+            # Base dataset returned only the image (val/test path)
+            return r
+        # If not training (or annotations are empty), just return the image.
+        if 'train' not in self.dataset or (isinstance(anno, list) and len(anno) == 0):
+            return img
+        # --- /guard ---
+        r = super().__getitem__(idx)
+        # parent may return more than 3 values; take the first three
+        img, anno, image_info = (r[0], r[1], r[2]) if isinstance(r, (list, tuple)) else r
 
         mask = self.get_mask(anno, image_info)
 

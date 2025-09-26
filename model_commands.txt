@@ -1,0 +1,116 @@
+DEKR HRNet-W32: train/infer at 512×512 (official setting). 
+
+DEKR HRNet-W48: train/infer at 640×640 (official setting; slightly higher AP but much heavier compute). 
+
+Why: the reference repo reports COCO results exactly at those square sizes (W32 @ 512; W48 @ 640) and shows the compute jump (≈45 GFLOPs → ≈142 GFLOPs) along with the accuracy bump—so pick based on your GPU budget vs. accuracy target. 
+
+For your rink DEKR:
+
+If you can afford it, go 640×640 (cleaner lines/boards, sub-pixel edges help).
+
+If you need throughput or larger batches, 512×512 is a solid default.
+
+Always letterbox (preserve 16:9, pad to square); never stretch the rink.
+
+If you tell me your GPU (e.g., 24 GB vs 48 GB) and preferred batch size, I’ll suggest an exact input size + batch that will fit comfortably.
+
+
+source .venv/bin/activate
+
+cd ~/DEKR
+CKPT=output/coco_kpt/hrnet_dekr/w32_rink_512/checkpoint.pth.tar
+
+CUDA_VISIBLE_DEVICES=0 OMP_NUM_THREADS=4 \
+python tools/train.py \
+  --cfg experiments/rink/w32/w32_rink_512.yaml \
+  TRAIN.RESUME True \
+  TRAIN.CHECKPOINT $CKPT \
+  TRAIN.IMAGES_PER_GPU 8 \
+  WORKERS 12 \
+  PRINT_FREQ 5
+
+
+
+validation:
+
+
+CKPT=output/coco_kpt/hrnet_dekr/w32_rink_512/model_best.pth.tar
+
+CUDA_VISIBLE_DEVICES=0 \
+python tools/valid.py \
+  --cfg experiments/rink/w32/w32_rink_512.yaml \
+  TEST.MODEL_FILE $CKPT \
+  TEST.SCALE_FACTOR 0.5,1,2 \
+  TEST.NMS_THRE 0.15 \
+  TEST.MATCH_HMP True
+
+cd /home/wner/DEKR
+CKPT=output/coco_kpt/hrnet_dekr/w32_rink_512/checkpoint.pth.tar
+
+CUDA_VISIBLE_DEVICES=0 OMP_NUM_THREADS=4 \
+python tools/train.py \
+  --cfg experiments/rink/w32/w32_rink_512.yaml \
+  TRAIN.RESUME True \
+  TRAIN.CHECKPOINT $CKPT \
+  TRAIN.IMAGES_PER_GPU 8 \
+  WORKERS 4 \
+  AMP True \
+  TF32 True \
+  CHANNELS_LAST True \
+  PIN_MEMORY False \
+  PREFETCH_FACTOR 4 \
+  PERSISTENT_WORKERS False \
+  FILE_SYSTEM_SHARING True \
+  PRINT_FREQ 5
+
+
+out put validation:
+
+# from ~/DEKR
+python tools/vis_from_results_strong.py \
+  --ann data/rink/annotations/person_keypoints_val2017.json \
+  --res output/coco_kpt/hrnet_dekr/w32_rink_512/results/keypoints_val2017regression_results.json \
+  --img-root data/rink/images/val2017 \
+  --out output/rink_val_vis_loose \
+  --th 0.001 \
+  --kp-th 0.05 \
+  --radius 6 --thick 2 --draw-idx
+
+
+
+
+test synthectic
+PYTHONPATH=lib python tools/infer_one.py \
+  --cfg experiments/rink/w32/w32_rink_512.yaml \
+  --ckpt /home/wner/DEKR/output/coco_kpt/hrnet_dekr/w32_rink_512/model_best.pth.tar \
+  --img /mnt/c/Users/Owner/Desktop/test5.jpg \
+  --out output/one_image_vis.jpg \
+  --scales 0.5,1,2 \
+  --nms-thre 0.15 \
+  --match-hmp \
+  --th 0.001 \
+  --kp-th 0.02 \
+  --radius 6 \
+  --thick 2 \
+  --draw-idx \
+  --debug
+
+
+python tools/train.py --cfg experiments/rink/w32/w32_rink_512.yaml AUTO_RESUME True TRAIN.END_EPOCH 220
+
+python tools/train.py --cfg experiments/rink/w32/w32_rink_512.yaml PROGRESS_BAR True
+
+
+source ~/.venv/bin/activate
+
+
+
+python tools/train.py --cfg experiments/rink/w32/w32_rink_512.yaml \
+  AUTO_RESUME False TRAIN.RESUME False PROGRESS_BAR True \
+  MODEL.PRETRAINED output/coco_kpt/hrnet_dekr/w32_rink_512/final_state0.pth.tar
+
+
+
+
+CUDA_VISIBLE_DEVICES=0 OMP_NUM_THREADS=4 python tools/train.py --cfg experiments/rink/w32/w32_rink_512.yaml AUTO_RESUME False TRAIN.RESUME False PROGRESS_BAR False PRINT_FREQ 20 WORKERS 8 TRAIN.IMAGES_PER_GPU 8 TRAIN.END_EPOCH 220
+

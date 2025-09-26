@@ -24,8 +24,12 @@ _C.DATA_DIR = ''
 _C.GPUS = (0,)
 _C.WORKERS = 4
 _C.PRINT_FREQ = 20
+_C.PROGRESS_BAR = False
 _C.AUTO_RESUME = False
 _C.PIN_MEMORY = True
+_C.PREFETCH_FACTOR = 2
+_C.PERSISTENT_WORKERS = True
+_C.FILE_SYSTEM_SHARING = True
 _C.RANK = 0
 _C.VERBOSE = True
 _C.DIST_BACKEND = 'nccl'
@@ -36,6 +40,11 @@ _C.CUDNN = CN()
 _C.CUDNN.BENCHMARK = True
 _C.CUDNN.DETERMINISTIC = False
 _C.CUDNN.ENABLED = True
+
+# Performance toggles
+_C.AMP = False
+_C.TF32 = True
+_C.CHANNELS_LAST = False
 
 # common params for NETWORK
 _C.MODEL = CN()

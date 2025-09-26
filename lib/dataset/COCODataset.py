@@ -51,6 +51,7 @@ class CocoDataset(Dataset):
                 for cls in self.classes[1:]
             ]
         )
+        self.num_joints = cfg.DATASET.NUM_JOINTS
 
     def _get_anno_file_name(self):
         # example: root/annotations/person_keypoints_tran2017.json
@@ -114,7 +115,8 @@ class CocoDataset(Dataset):
         if 'train' in self.dataset:
             return img, [obj for obj in target], image_info
         else:
-            return img
+            # keep return signature consistent for subclasses
+            return img, [], image_info
 
     def __len__(self):
         return len(self.ids)
@@ -167,11 +169,11 @@ class CocoDataset(Dataset):
                     (np.max(kpt[:, 1]) - np.min(kpt[:, 1]))
                 kpt = self.processKeypoints(kpt)
 
-                kpts[int(file_name[-16:-4])].append(
+                kpts[int(img_id)].append(
                     {
                         'keypoints': kpt[:, 0:3],
                         'score': scores[idx][idx_kpt],
-                        'image': int(file_name[-16:-4]),
+                        'image': int(img_id),
                         'area': area
                     }
                 )
@@ -235,7 +237,7 @@ class CocoDataset(Dataset):
         cat_id = data_pack['cat_id']
         keypoints = data_pack['keypoints']
         cat_results = []
-        num_joints = 17
+        num_joints = self.num_joints
 
         for img_kpts in keypoints:
             if len(img_kpts) == 0:
@@ -246,7 +248,7 @@ class CocoDataset(Dataset):
             )
             key_points = np.zeros(
                 (_key_points.shape[0], num_joints * 3),
-                dtype=np.float
+                dtype=np.float32
             )
 
             for ipt in range(num_joints):
@@ -277,6 +279,9 @@ class CocoDataset(Dataset):
         coco_dt = self.coco.loadRes(res_file)
         coco_eval = COCOeval(self.coco, coco_dt, 'keypoints')
         coco_eval.params.useSegm = None
+        import numpy as _np
+        if not hasattr(coco_eval.params, 'kpt_oks_sigmas') or len(coco_eval.params.kpt_oks_sigmas) != self.num_joints:
+            coco_eval.params.kpt_oks_sigmas = _np.ones((self.num_joints,), dtype=_np.float32) * (0.5 / 10.0)
         coco_eval.evaluate()
         coco_eval.accumulate()
         coco_eval.summarize()
@@ -310,11 +315,11 @@ class CocoRescoreDataset(CocoDataset):
                     (np.max(kpt[:, 1]) - np.min(kpt[:, 1]))
                 kpt = self.processKeypoints(kpt)
 
-                kpts[int(file_name[-16:-4])].append(
+                kpts[int(img_id)].append(
                     {
                         'keypoints': kpt[:, 0:3],
                         'score': scores[idx][idx_kpt],
-                        'image': int(file_name[-16:-4]),
+                        'image': int(img_id),
                         'area': area
                     }
                 )

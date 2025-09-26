@@ -72,7 +72,9 @@ def make_dataloader(cfg, is_train=True, distributed=False):
         shuffle=shuffle,
         num_workers=cfg.WORKERS,
         pin_memory=cfg.PIN_MEMORY,
-        sampler=train_sampler
+        sampler=train_sampler,
+        prefetch_factor=getattr(cfg, 'PREFETCH_FACTOR', 2),
+        persistent_workers=getattr(cfg, 'PERSISTENT_WORKERS', True)
     )
 
     return data_loader

@@ -65,40 +65,52 @@ def pose_nms(cfg, heatmap_avg, poses):
 
     Args:
         heatmap_avg (Tensor): Avg of the heatmaps at all scales (1, 1+num_joints, w, h)
-        poses (List): Gather of the pose proposals [(num_people, num_joints, 3)]
+        poses (List[Tensor]): pose proposals per scale [(num_people, num_joints, 3)]
     """
+    # pick the scale "1.0" as reference
     scale1_index = sorted(cfg.TEST.SCALE_FACTOR, reverse=True).index(1.0)
     pose_norm = poses[scale1_index]
-    max_score = pose_norm[:,:,2].max() if pose_norm.shape[0] else 1
+    max_score = pose_norm[:, :, 2].max() if pose_norm.shape[0] else 1
 
+    # normalize scores across scales
     for i, pose in enumerate(poses):
         if i != scale1_index:
-            max_score_scale = pose[:,:,2].max() if pose.shape[0] else 1
-            pose[:,:,2] = pose[:,:,2]/max_score_scale*max_score*cfg.TEST.DECREASE
+            max_score_scale = pose[:, :, 2].max() if pose.shape[0] else 1
+            pose[:, :, 2] = pose[:, :, 2] / (max_score_scale if max_score_scale > 0 else 1) \
+                            * max_score * cfg.TEST.DECREASE
 
-    pose_score = torch.cat([pose[:,:,2:] for pose in poses], dim=0)
-    pose_coord = torch.cat([pose[:,:,:2] for pose in poses], dim=0)
+    # concat coords/scores across scales (still on device for heat operations)
+    pose_score = torch.cat([pose[:, :, 2:] for pose in poses], dim=0)   # (N, J, 1)
+    pose_coord = torch.cat([pose[:, :, :2] for pose in poses], dim=0)   # (N, J, 2)
 
     if pose_coord.shape[0] == 0:
         return [], []
 
     num_people, num_joints, _ = pose_coord.shape
-    heatval = get_heat_value(pose_coord, heatmap_avg[0])
-    heat_score = (torch.sum(heatval, dim=1)/num_joints)[:,0]
 
-    pose_score = pose_score*heatval
-    poses = torch.cat([pose_coord.cpu(), pose_score.cpu()], dim=2)
+    # heat value per joint/person for scoring
+    heatval = get_heat_value(pose_coord, heatmap_avg[0])                # (N, J, 1), same device as heatmap
+    heat_score = (torch.sum(heatval, dim=1) / num_joints)[:, 0]         # (N,)
 
-    keep_pose_inds = nms_core(cfg, pose_coord, heat_score)
-    poses = poses[keep_pose_inds]
-    heat_score = heat_score[keep_pose_inds]
-    
-    if len(keep_pose_inds) > cfg.DATASET.MAX_NUM_PEOPLE:
-        heat_score, topk_inds = torch.topk(heat_score,
-                                            cfg.DATASET.MAX_NUM_PEOPLE)
-        poses = poses[topk_inds]
+    # we will keep a CPU copy of poses for JSON/NumPy later, but keep heat_score on its device
+    poses_cpu = torch.cat([pose_coord.detach().cpu(),
+                           (pose_score * heatval).detach().cpu()], dim=2)  # (N, J, 3) on CPU
 
-    poses = [poses.numpy()]
-    scores = [i[:, 2].mean() for i in poses[0]]
+    # NMS on the device of pose_coord/heat_score
+    keep_pose_inds = nms_core(cfg, pose_coord, heat_score)  # list[int]
+    if len(keep_pose_inds) == 0:
+        return [], []
 
-    return poses, scores
+    keep_pose_inds_t = torch.as_tensor(keep_pose_inds, dtype=torch.long, device=heat_score.device)
+    # filter heat_score on its device, and poses on CPU with CPU indices
+    heat_score = heat_score.index_select(0, keep_pose_inds_t)
+    poses_cpu = poses_cpu.index_select(0, keep_pose_inds_t.detach().cpu())
+
+    # limit max people with top-k (be careful with devices!)
+    if heat_score.numel() > cfg.DATASET.MAX_NUM_PEOPLE:
+        heat_score, topk_inds = torch.topk(heat_score, cfg.DATASET.MAX_NUM_PEOPLE)
+        poses_cpu = poses_cpu.index_select(0, topk_inds.detach().cpu())
+
+    poses_list = [poses_cpu.numpy()]
+    scores = [p[:, 2].mean() for p in poses_list[0]]
+    return poses_list, scores

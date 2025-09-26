@@ -14,6 +14,8 @@ import os
 import time
 
 from utils.utils import AverageMeter
+import torch
+from tqdm import tqdm
 
 
 def do_train(cfg, model, data_loader, loss_factory, optimizer, epoch,
@@ -29,18 +31,30 @@ def do_train(cfg, model, data_loader, loss_factory, optimizer, epoch,
     model.train()
 
     end = time.time()
-    for i, (image, heatmap, mask, offset, offset_w) in enumerate(data_loader):
+    iterator = enumerate(data_loader)
+    if getattr(cfg, 'PROGRESS_BAR', False) and cfg.RANK == 0:
+        iterator = tqdm(iterator, total=len(data_loader), desc=f"Epoch {epoch}")
+
+    # mixed precision setup
+    use_amp = getattr(cfg, 'AMP', False)
+    # use new torch.amp API to avoid deprecation warning
+    scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
+
+    for i, (image, heatmap, mask, offset, offset_w) in iterator:
         data_time.update(time.time() - end)
 
-        pheatmap, poffset = model(image)
+        # move inputs to GPU before forward for performance
+        image = image.cuda(non_blocking=True)
 
         heatmap = heatmap.cuda(non_blocking=True)
         mask = mask.cuda(non_blocking=True)
         offset = offset.cuda(non_blocking=True)
         offset_w = offset_w.cuda(non_blocking=True)
 
-        heatmap_loss, offset_loss = \
-            loss_factory(pheatmap, poffset, heatmap, mask, offset, offset_w)
+        with torch.amp.autocast('cuda', enabled=use_amp):
+            pheatmap, poffset = model(image)
+            heatmap_loss, offset_loss = \
+                loss_factory(pheatmap, poffset, heatmap, mask, offset, offset_w)
 
         loss = 0
         if heatmap_loss is not None:
@@ -50,14 +64,19 @@ def do_train(cfg, model, data_loader, loss_factory, optimizer, epoch,
             offset_loss_meter.update(offset_loss.item(), image.size(0))
             loss = loss + offset_loss
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        optimizer.zero_grad(set_to_none=True)
+        if use_amp:
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            optimizer.step()
 
         batch_time.update(time.time() - end)
         end = time.time()
 
-        if i % cfg.PRINT_FREQ == 0 and cfg.RANK == 0:
+        if (not getattr(cfg, 'PROGRESS_BAR', False)) and i % cfg.PRINT_FREQ == 0 and cfg.RANK == 0:
             msg = 'Epoch: [{0}][{1}/{2}]\t' \
                   'Time: {batch_time.val:.3f}s ({batch_time.avg:.3f}s)\t' \
                   'Speed: {speed:.1f} samples/s\t' \
