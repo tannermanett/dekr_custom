@@ -1,3 +1,8 @@
+# =========================
+# DEKR HRNet-W32 (Rink-56)
+# Small dataset (≈1,200 imgs)
+# =========================
+
 AUTO_RESUME: True
 DATA_DIR: ''
 GPUS: (0,)
@@ -12,24 +17,30 @@ CUDNN:
   ENABLED: True
 
 DATASET:
-  # use the DEKR COCO-style loader
+  # COCO-style keypoint loader; plain JPGs in folders
   DATASET: coco_kpt
   DATASET_TEST: coco_kpt
-  # our images are regular jpgs in folders (not zipped)
   DATA_FORMAT: jpg
-  FLIP: 0.0            # turn off flip aug (no L/R symmetry for rink points)
+
+  # ---- Augmentation (rink-aware) ----
+  # Flip off: no true L/R symmetry across the rink template
+  FLIP: 0.0
   INPUT_SIZE: 512
   OUTPUT_SIZE: 128
-  MAX_NUM_PEOPLE: 3    # normally one rink; keep small but >1 for safety
-  MAX_ROTATION: 30
-  MAX_SCALE: 1.5
+  MAX_NUM_PEOPLE: 3
+  # Slightly tighter than generic DEKR to reflect broadcast pans/zooms
+  MAX_ROTATION: 20        # was 30
   SCALE_TYPE: 'short'
+  MIN_SCALE: 0.8          # was 0.75
+  MAX_SCALE: 1.4          # was 1.5
   MAX_TRANSLATE: 40
-  MIN_SCALE: 0.75
-  NUM_JOINTS: 56       # <<< your 56 keypoints
-  ROOT: 'data/rink'    # <<< where you put train2017/val2017 + annotations
+
+  NUM_JOINTS: 56          # rink-56
+  ROOT: 'data/rink'       # contains train2017/ val2017 + annotations
   TEST: val2017
   TRAIN: train2017
+
+  # Heatmap/offset target settings
   OFFSET_RADIUS: 4
   SIGMA: 2.0
   CENTER_SIGMA: 4.0
@@ -39,9 +50,14 @@ LOSS:
   WITH_HEATMAPS_LOSS: True
   HEATMAPS_LOSS_FACTOR: 1.0
   WITH_OFFSETS_LOSS: True
-  OFFSETS_LOSS_FACTOR: 0.03
+  OFFSETS_LOSS_FACTOR: 0.03   # can bump to 0.04–0.05 late if offsets lag
 
 MODEL:
+  NAME: hrnet_dekr
+  INIT_WEIGHTS: True
+  NUM_JOINTS: 56
+  PRETRAINED: 'model/imagenet/hrnet_w32-36af842e.pth'
+
   SPEC:
     FINAL_CONV_KERNEL: 1
     PRETRAINED_LAYERS: ['*']
@@ -59,23 +75,21 @@ MODEL:
         - [32, 64, 128]
         - [32, 64, 128, 256]
       FUSE_METHOD: [SUM, SUM, SUM]
+
     HEAD_HEATMAP:
       BLOCK: BASIC
       NUM_BLOCKS: 1
       NUM_CHANNELS: 32
       DILATION_RATE: 1
+
     HEAD_OFFSET:
       BLOCK: ADAPTIVE
       NUM_BLOCKS: 2
-      NUM_CHANNELS_PERKPT: 15   # leave as-is (per-keypoint offset channels)
+      NUM_CHANNELS_PERKPT: 15
       DILATION_RATE: 1
-  INIT_WEIGHTS: True
-  NAME: hrnet_dekr
-  NUM_JOINTS: 56                 # <<< match dataset
-  PRETRAINED: 'model/imagenet/hrnet_w32-36af842e.pth'
 
 TEST:
-  FLIP_TEST: False               # no flip test for rink
+  FLIP_TEST: False
   IMAGES_PER_GPU: 1
   MODEL_FILE: ''
   SCALE_FACTOR: [1]
@@ -88,23 +102,24 @@ TEST:
   DECREASE: 0.9
 
 RESCORE:
-  VALID: False                   # turn off scoring-net for now (COCO-specific)
+  VALID: False
 
 TRAIN:
   BEGIN_EPOCH: 0
   CHECKPOINT: ''
-  END_EPOCH: 140
-  GAMMA1: 0.99
-  GAMMA2: 0.0
-  IMAGES_PER_GPU: 6              # adjust if OOM (e.g., 4 or 2)
+  # ---- Extended small-dataset schedule ----
+  END_EPOCH: 200           # was 140; gives heads time to converge
   LR: 0.001
   LR_FACTOR: 0.1
-  LR_STEP: [90, 120]
-  MOMENTUM: 0.9
-  NESTEROV: False
+  LR_STEP: [120, 170]      # at ~60% and ~85% of total epochs
   OPTIMIZER: adam
+  MOMENTUM: 0.9            # ignored by Adam but harmless in config
+  NESTEROV: False
+  GAMMA1: 0.99
+  GAMMA2: 0.0
+  IMAGES_PER_GPU: 6        # try 8 if VRAM allows; keep 6 for safety
+  WD: 0.0001
   RESUME: False
   SHUFFLE: True
-  WD: 0.0001
 
 WORKERS: 4
